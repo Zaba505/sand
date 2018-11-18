@@ -1,9 +1,10 @@
-// This package implements a concurrent model for an interpreter, which views
+// Package sand is for creating interpreters.
+//
+// This package implements a concurrent model for an interpreter. Which views
 // an interpreter as two separate components, a User Interface (UI) and a Command
 // Processor (Engine). The UI is provided for you, whereas, Engine implementations
 // must be provided.
 //
-// Package sand is for creating interpreters.
 package sand
 
 import (
@@ -22,7 +23,7 @@ var ErrNoEngine = errors.New("intrptr: interpreter has no associated engine")
 // signals the UI has received.
 type SignalHandler func(os.Signal) os.Signal
 
-// Option represents settings an option for the interpreter UI.
+// Option represents setting an option for the interpreter UI.
 type Option func(*UI)
 
 // WithPrefix specifies the prefix
@@ -48,8 +49,10 @@ func WithSignalHandlers(handlers map[os.Signal]SignalHandler) Option {
 }
 
 // UI represents the user interface for the interpreter.
-// By default, UI will listen for Interrupt signals and
-// handle them as graceful as possible.
+// UI will listens for Interrupt signals and
+// handles them as graceful as possible. If
+// signal handlers are provided then the handling of
+// the Interrupt signal can be overwritten.
 //
 type UI struct {
 	// Engine shit

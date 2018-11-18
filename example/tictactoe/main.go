@@ -10,8 +10,10 @@ import (
 	"unicode/utf8"
 )
 
+// Player represents X or O
 type Player uint8
 
+// players
 const (
 	Nan Player = iota
 	X

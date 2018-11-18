@@ -11,6 +11,7 @@ import (
 // EchoEngine simply echos the given line
 type EchoEngine struct{}
 
+// Exec simply writes the given line back to the ui
 func (eng *EchoEngine) Exec(ctx context.Context, line string, ui io.ReadWriter) (status int) {
 	select {
 	case <-ctx.Done():
@@ -20,7 +21,7 @@ func (eng *EchoEngine) Exec(ctx context.Context, line string, ui io.ReadWriter) 
 
 	_, err := ui.Write([]byte(line))
 	if err != nil {
-		log.Printf("error encounterd: %s\n", err)
+		log.Printf("error encountered: %s\n", err)
 		return 1
 	}
 	return
