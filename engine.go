@@ -27,10 +27,11 @@ func (ui *UI) exec(ctx context.Context, line string) int {
 		ui:     ui,
 		respCh: make(chan int),
 	}
-	defer close(req.respCh)
-
-	ui.reqCh <- req
-
+	select {
+	case <-ctx.Done():
+		return 0
+	case ui.reqCh <- req:
+	}
 	return <-req.respCh
 }
 
@@ -46,7 +47,13 @@ func runEngine(ctx context.Context, eng Engine, reqChs chan chan execReq) {
 			go func(rc chan execReq) {
 				for req := range rc {
 					resp := eng.Exec(req.ctx, req.line, req.ui)
-					req.respCh <- resp
+					select {
+					case <-ctx.Done():
+						close(req.respCh)
+						return
+					case req.respCh <- resp:
+					}
+					close(req.respCh)
 				}
 			}(reqCh)
 		}

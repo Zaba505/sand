@@ -101,13 +101,13 @@ func (ui *UI) SetIO(in io.Reader, out io.Writer) {
 // Run creates a UI and associates the provided Engine to it.
 // It then starts the UI. I/O must be provided for this call
 // to not panic.
-func Run(eng Engine, opts ...Option) error {
+func Run(ctx context.Context, eng Engine, opts ...Option) error {
 	if eng == nil {
 		return ErrNoEngine
 	}
 
 	ui := NewUI(eng)
-	return ui.Run(opts...)
+	return ui.Run(ctx, opts...)
 }
 
 // minRead
@@ -116,10 +116,14 @@ const minRead = 512
 // Run starts the user interface with the provided sources
 // for input and output of the interpreter and engine.
 // The prefix will be printed before every line.
-func (ui *UI) Run(opts ...Option) (err error) {
+func (ui *UI) Run(ctx context.Context, opts ...Option) (err error) {
 	// Make sure engine is set
 	if ui.eng == nil {
 		return ErrNoEngine
+	}
+	// Check if context is nil
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	// Set options
@@ -129,7 +133,9 @@ func (ui *UI) Run(opts ...Option) (err error) {
 
 	// Set signal handling
 	var cancel func()
-	ui.ctx, cancel = context.WithCancel(context.Background())
+	ui.ctx, cancel = context.WithCancel(ctx)
+	defer cancel()
+	defer close(ui.sigs)
 	go func() {
 		for sig := range ui.sigs {
 			handler, exists := ui.sigHandlers[sig]
@@ -159,6 +165,7 @@ func (ui *UI) Run(opts ...Option) (err error) {
 	}()
 	defer close(ui.reqCh)
 
+	var n int
 	for {
 		// Write prefix
 		_, err = ui.Write(nil)
@@ -168,17 +175,22 @@ func (ui *UI) Run(opts ...Option) (err error) {
 
 		// Read line
 		b := make([]byte, minRead)
-		_, err = ui.Read(b)
-		if err != nil {
-			if err == context.Canceled {
-				err = nil
-			}
+		n, err = ui.Read(b)
+		if err == context.Canceled {
+			return nil
+		}
+		if err != nil && err != io.EOF || n == 0 {
 			return
 		}
 
 		// Execute line
 		status := ui.exec(ui.ctx, string(b))
 		if status != 0 {
+			return
+		}
+
+		// Check if we hit EOF on previous read
+		if err == io.EOF {
 			return
 		}
 	}
@@ -219,7 +231,10 @@ type readResp struct {
 func (ui *UI) readAsync(b []byte, readCh chan readResp) {
 	var resp readResp
 	resp.n, resp.err = ui.i.Read(b)
-	readCh <- resp
+	select {
+	case <-ui.ctx.Done():
+	case readCh <- resp:
+	}
 	close(readCh)
 }
 

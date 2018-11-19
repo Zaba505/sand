@@ -175,7 +175,7 @@ func main() {
 	ui.SetPrefix(">")
 	ui.SetIO(os.Stdin, os.Stdout)
 
-	if err := ui.Run(); err != nil {
+	if err := ui.Run(nil); err != nil {
 		log.Fatal(err)
 	}
 }

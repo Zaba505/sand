@@ -81,7 +81,7 @@ func TestRootCmd(t *testing.T) {
 				subT.Error(err)
 			}
 
-			if err = ui.Run(); err != io.EOF {
+			if err = ui.Run(nil); err != io.EOF {
 				subT.Error(err)
 			}
 
@@ -95,5 +95,6 @@ func TestRootCmd(t *testing.T) {
 				subT.Fail()
 			}
 		})
+
 	}
 }

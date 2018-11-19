@@ -32,6 +32,7 @@ func main() {
 
 	log.SetOutput(os.Stdout)
 	err := ui.Run(
+		nil,
 		sand.WithPrefix(">"),
 		sand.WithIO(os.Stdin, os.Stdout),
 	)
