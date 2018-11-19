@@ -1,7 +1,8 @@
-// Package main demonstrates using sand for a CLI based game.
+// Package main demonstrates starting an Engine without starting it from inside a UI.
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/Zaba505/sand"
@@ -41,11 +42,6 @@ type T3Engine struct {
 
 // Exec starts a Tic-Tac-Toe game
 func (eng *T3Engine) Exec(ctx context.Context, line string, ui io.ReadWriter) int {
-	// Command 'tictactoe' is the only valid triggerer
-	if line[:9] != "tictactoe" {
-		return 1
-	}
-
 	// Create board
 	eng.board = make([][]Player, 3)
 	for i := range eng.board {
@@ -171,12 +167,12 @@ func hasWinner(board [][]Player) (player Player, ok bool) {
 }
 
 func main() {
-	ui := sand.NewUI(new(T3Engine))
+	// In the example, tictactoe, you had to first type in 'tictactoe'
+	// but in this example the tictactoe game will be started immediately
+	in := io.MultiReader(bytes.NewReader([]byte(" ")), os.Stdin)
 
-	ui.SetPrefix(">")
-	ui.SetIO(os.Stdin, os.Stdout)
-
-	if err := ui.Run(nil); err != nil {
+	err := sand.Run(nil, new(T3Engine), sand.WithPrefix(">"), sand.WithIO(in, os.Stdout))
+	if err != nil {
 		log.Fatal(err)
 	}
 }

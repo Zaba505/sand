@@ -1,3 +1,4 @@
+// Package main demonstrates using sand in a basic manner.
 package main
 
 import (

@@ -49,7 +49,7 @@ func WithSignalHandlers(handlers map[os.Signal]SignalHandler) Option {
 }
 
 // UI represents the user interface for the interpreter.
-// UI will listens for Interrupt signals and
+// UI listens for Interrupt signals and
 // handles them as graceful as possible. If
 // signal handlers are provided then the handling of
 // the Interrupt signal can be overwritten.
@@ -222,14 +222,15 @@ func (ui *UI) startEngine(ctx context.Context, eng Engine) {
 	reqCh <- ui.reqCh
 }
 
-type readResp struct {
+// ioResp represents the response parameters from either a Read or Write call.
+type ioResp struct {
 	n   int
 	err error
 }
 
-// readAsync wraps a Read call and sends the result to the give channel
-func (ui *UI) readAsync(b []byte, readCh chan readResp) {
-	var resp readResp
+// readAsync wraps a Read call and sends the result to the given channel
+func (ui *UI) readAsync(b []byte, readCh chan ioResp) {
+	var resp ioResp
 	resp.n, resp.err = ui.i.Read(b)
 	select {
 	case <-ui.ctx.Done():
@@ -244,7 +245,7 @@ func (ui *UI) readAsync(b []byte, readCh chan readResp) {
 // context errors appropriately. See examples for
 // such handling.
 func (ui *UI) Read(b []byte) (n int, err error) {
-	readCh := make(chan readResp, 1)
+	readCh := make(chan ioResp, 1)
 
 	go ui.readAsync(b, readCh)
 
@@ -259,12 +260,32 @@ func (ui *UI) Read(b []byte) (n int, err error) {
 	return
 }
 
+// writeAsync wraps a Write call and send the result to the given channel
+func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
+	var resp ioResp
+	resp.n, resp.err = ui.o.Write(append(ui.prefix, b...))
+	select {
+	case <-ui.ctx.Done():
+	case writeCh <- resp:
+	}
+	close(writeCh)
+}
+
 // Write writes the provided bytes to the UIs underlying
 // output along with the prefix characters.
 func (ui *UI) Write(b []byte) (n int, err error) {
-	n, err = ui.o.Write(ui.prefix) // TODO: Handle prefix error properly
-	if err == nil && b != nil {
-		n, err = ui.o.Write(b)
+	// TODO(Zaba505): Should writes be buffered as to allow for limiting i.e. limit network calls if ui.o == net.Conn
+	writeCh := make(chan ioResp, 1)
+
+	go ui.writeAsync(b, writeCh)
+
+	select {
+	case <-ui.ctx.Done():
+		err = ui.ctx.Err()
+		return
+	case resp := <-writeCh:
+		n = resp.n
+		err = resp.err
 	}
 	return
 }

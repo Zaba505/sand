@@ -6,6 +6,10 @@ import (
 )
 
 // Engine represents the command processor for the interpreter.
+// The underlying type of the Engine implementation must be a
+// hashable type (e.g. int, string, struct) in order for the UI
+// to be able to use it. Sadly, this means a type EngineFunc
+// can not be used due to funcs not being hashable.
 type Engine interface {
 	// Exec should take the given line and execute the corresponding functionality.
 	Exec(ctx context.Context, line string, ui io.ReadWriter) (status int)

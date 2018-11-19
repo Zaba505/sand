@@ -1,3 +1,4 @@
+// Package main shows using sand for testing environment
 package main
 
 import (
