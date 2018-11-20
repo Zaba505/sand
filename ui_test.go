@@ -212,6 +212,6 @@ func TestRunWithNoEngine(t *testing.T) {
 	ui := new(UI)
 	err = ui.Run(nil, nil)
 	if err != ErrNoEngine {
-		t.Errorf("expected ErrNoEngine but instead recieved: %s", err)
+		t.Errorf("expected ErrNoEngine but instead received: %s", err)
 	}
 }
