@@ -57,7 +57,6 @@ func WithSignalHandlers(handlers map[os.Signal]SignalHandler) Option {
 //
 type UI struct {
 	// Engine shit
-	eng   Engine
 	reqCh chan execReq
 
 	// I/O shit
@@ -73,13 +72,11 @@ type UI struct {
 }
 
 // NewUI returns a new user interface for an interpreter.
-func NewUI(eng Engine, opts ...Option) *UI {
+func NewUI(opts ...Option) *UI {
 	ui := &UI{
-		eng:   eng,
 		reqCh: make(chan execReq),
 		sigs:  make(chan os.Signal, 1),
 	}
-	signal.Notify(ui.sigs, os.Interrupt)
 
 	for _, opt := range opts {
 		opt(ui)
@@ -107,8 +104,8 @@ func Run(ctx context.Context, eng Engine, opts ...Option) error {
 		return ErrNoEngine
 	}
 
-	ui := NewUI(eng)
-	return ui.Run(ctx, opts...)
+	ui := NewUI()
+	return ui.Run(ctx, eng, opts...)
 }
 
 // minRead
@@ -117,15 +114,21 @@ const minRead = 512
 // Run starts the user interface with the provided sources
 // for input and output of the interpreter and engine.
 // The prefix will be printed before every line.
-func (ui *UI) Run(ctx context.Context, opts ...Option) (err error) {
+func (ui *UI) Run(ctx context.Context, eng Engine, opts ...Option) (err error) {
 	// Make sure engine is set
-	if ui.eng == nil {
+	if eng == nil {
 		return ErrNoEngine
 	}
 	// Check if context is nil
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Check signal channel and set up signal notification
+	if ui.sigs == nil {
+		ui.sigs = make(chan os.Signal, 1)
+	}
+	signal.Notify(ui.sigs, os.Interrupt)
 
 	// Set options
 	for _, opt := range opts {
@@ -138,24 +141,23 @@ func (ui *UI) Run(ctx context.Context, opts ...Option) (err error) {
 	defer cancel()
 	defer close(ui.sigs)
 	go func() {
-		for sig := range ui.sigs {
-			handler, exists := ui.sigHandlers[sig]
-			if exists {
-				sig = handler(sig)
-			}
-			if sig == os.Kill || sig == os.Interrupt {
-				cancel()
-			}
+		for {
 			select {
 			case <-ui.ctx.Done():
-				return
-			default:
+			case sig := <-ui.sigs:
+				handler, exists := ui.sigHandlers[sig]
+				if exists {
+					sig = handler(sig)
+				}
+				if sig == os.Kill || sig == os.Interrupt {
+					cancel()
+				}
 			}
 		}
 	}()
 
 	// Start engine
-	ui.startEngine(ui.ctx, ui.eng)
+	ui.startEngine(ui.ctx, eng)
 
 	// Now, begin reading lines from input.
 	defer func() {

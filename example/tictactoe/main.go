@@ -171,12 +171,12 @@ func hasWinner(board [][]Player) (player Player, ok bool) {
 }
 
 func main() {
-	ui := sand.NewUI(new(T3Engine))
+	ui := sand.NewUI()
 
 	ui.SetPrefix(">")
 	ui.SetIO(os.Stdin, os.Stdout)
 
-	if err := ui.Run(nil); err != nil {
+	if err := ui.Run(nil, new(T3Engine)); err != nil {
 		log.Fatal(err)
 	}
 }

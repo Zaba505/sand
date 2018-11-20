@@ -49,6 +49,76 @@ func (mr *MockEngineMockRecorder) Exec(arg0, arg1, arg2 interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockEngine)(nil).Exec), arg0, arg1, arg2)
 }
 
+// This doesn't actually test the func NewUI but instead it tests using a new(UI)
+func TestNewUI(t *testing.T) {
+	// Set engine
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	eng := NewMockEngine(ctrl)
+	eng.EXPECT().Exec(gomock.Any(), gomock.Eq("hello, world!"), gomock.Any()).Return(0).MinTimes(1)
+
+	// Set IO
+	in := bytes.NewReader([]byte("hello, world!"))
+	var out bytes.Buffer
+
+	// Run UI
+	ui := new(UI)
+	ui.SetPrefix(">")
+	ui.SetIO(in, &out)
+	err := ui.Run(nil, eng)
+	if err != nil && err != io.EOF {
+		t.Error(err)
+	}
+
+	// Verify the output length
+	// 	- First prefix write
+	//  - Second prefix write
+	//  - EndLine from defer.
+	if out.Len() != 3 {
+		t.Fail()
+	}
+
+	// Verify the output: ">>\n"
+	if out.String() != ">>\n" {
+		t.Fail()
+	}
+}
+
+// This is the same as TestRun but just assures test coverage
+func TestUI_Run(t *testing.T) {
+	// Set engine
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	eng := NewMockEngine(ctrl)
+	eng.EXPECT().Exec(gomock.Any(), gomock.Eq("hello, world!"), gomock.Any()).Return(0).MinTimes(1)
+
+	// Set IO
+	in := bytes.NewReader([]byte("hello, world!"))
+	var out bytes.Buffer
+
+	// Run UI
+	ui := NewUI()
+	ui.SetPrefix(">")
+	ui.SetIO(in, &out)
+	err := ui.Run(nil, eng)
+	if err != nil && err != io.EOF {
+		t.Error(err)
+	}
+
+	// Verify the output length
+	// 	- First prefix write
+	//  - Second prefix write
+	//  - EndLine from defer.
+	if out.Len() != 3 {
+		t.Fail()
+	}
+
+	// Verify the output: ">>\n"
+	if out.String() != ">>\n" {
+		t.Fail()
+	}
+}
+
 func TestRun(t *testing.T) {
 	// Set engine
 	ctrl := gomock.NewController(t)
@@ -99,4 +169,49 @@ func TestRunWithContext(t *testing.T) {
 
 	pr.Close()
 	pw.Close()
+}
+
+// testLongEngine represents an Exec call that takes a long time.
+type testLongEngine struct {
+	timeout time.Duration
+}
+
+func (eng testLongEngine) Exec(ctx context.Context, _ string, _ io.ReadWriter) int {
+	select {
+	case <-ctx.Done():
+	case <-time.After(eng.timeout):
+	}
+	return 0
+}
+
+func TestRunWithLongExec(t *testing.T) {
+	sessionLife := 3 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), sessionLife)
+	defer cancel()
+	pr, pw := io.Pipe() // This allows Read to be blocking
+
+	// Set IO
+	in := bytes.NewReader([]byte("test line to start Engine.Exec call"))
+
+	eng := testLongEngine{timeout: 1 * time.Minute}
+	err := Run(ctx, eng, WithIO(in, ioutil.Discard))
+	if err != context.DeadlineExceeded {
+		t.Error(err)
+	}
+
+	pr.Close()
+	pw.Close()
+}
+
+func TestRunWithNoEngine(t *testing.T) {
+	err := Run(nil, nil)
+	if err != ErrNoEngine {
+		t.Errorf("expected ErrNoEngine but instead received: %s", err)
+	}
+
+	ui := new(UI)
+	err = ui.Run(nil, nil)
+	if err != ErrNoEngine {
+		t.Errorf("expected ErrNoEngine but instead recieved: %s", err)
+	}
 }

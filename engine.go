@@ -15,6 +15,7 @@ type Engine interface {
 	Exec(ctx context.Context, line string, ui io.ReadWriter) (status int)
 }
 
+// execReq represents the parameters passed to an Engine.Exec call
 type execReq struct {
 	ctx    context.Context
 	line   string

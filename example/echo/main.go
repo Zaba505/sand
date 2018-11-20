@@ -29,11 +29,12 @@ func (eng *EchoEngine) Exec(ctx context.Context, line string, ui io.ReadWriter) 
 }
 
 func main() {
-	ui := sand.NewUI(new(EchoEngine))
+	ui := sand.NewUI()
 
 	log.SetOutput(os.Stdout)
 	err := ui.Run(
 		nil,
+		new(EchoEngine),
 		sand.WithPrefix(">"),
 		sand.WithIO(os.Stdin, os.Stdout),
 	)

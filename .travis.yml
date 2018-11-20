@@ -7,5 +7,23 @@ go:
 - "1.11"
 - "tip"
 
+matrix:
+  allow_failures:
+  - go: tip
+  fast_finish: true
+
+notifications:
+  email: false
+
+before_script:
+- go get -u golang.org/x/lint/golint
+
 script:
-- go test -v -race ./...
+- test -z $(gofmt -s -l ./)
+- go vet ./...
+- go test -v -race -coverprofile=coverage.txt -covermode=atomic
+- test -z $(golint ./...)
+- go build
+
+after_success:
+- bash <(curl -s https://codecov.io/bash)
