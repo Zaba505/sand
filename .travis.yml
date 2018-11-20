@@ -1,10 +1,16 @@
 language: go
 
+env:
+- GO111MODULE=on
+
 go:
 - "1.9"
 - "1.10"
 - "1.11"
 - "tip"
+
+git:
+  depth: 1
 
 matrix:
   allow_failures:
@@ -15,13 +21,12 @@ notifications:
   email: false
 
 before_script:
-- go get -u golang.org/x/lint/golint
+- curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $GOPATH/bin v1.12.2
 
 script:
-- test -z $(gofmt -s -l ./)
+- golangci-lint run
 - go vet ./...
 - go test -v -race -coverprofile=coverage.txt -covermode=atomic
-- test -z $(golint ./...)
 - go build
 
 after_success:
