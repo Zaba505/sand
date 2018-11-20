@@ -69,7 +69,7 @@ func TestRootCmd(t *testing.T) {
 				H: echoHandler,
 			}
 
-			ui := sand.NewUI()
+			ui := new(sand.UI)
 
 			ui.SetPrefix(">")
 			ui.SetIO(&in, &out)
@@ -81,7 +81,9 @@ func TestRootCmd(t *testing.T) {
 				subT.Errorf("failed writing to input buffer: %s", err)
 			}
 
-			if err = ui.Run(nil, eng); err != io.EOF && err != nil {
+			err = ui.Run(nil, eng)
+			var ok bool
+			if err, ok = sand.IsRecoverable(err); !ok || err != io.EOF && err != nil {
 				subT.Errorf("unexpected error encountered during UI.Run(): %s", err)
 			}
 

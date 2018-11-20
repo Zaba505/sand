@@ -1,3 +1,5 @@
+// +build darwin dragonfly freebsd linux netbsd openbsd solaris
+
 package sand
 
 import (
@@ -6,7 +8,9 @@ import (
 	"github.com/golang/mock/gomock"
 	"io"
 	"io/ioutil"
+	"os"
 	"reflect"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -49,8 +53,8 @@ func (mr *MockEngineMockRecorder) Exec(arg0, arg1, arg2 interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockEngine)(nil).Exec), arg0, arg1, arg2)
 }
 
-// This doesn't actually test the func NewUI but instead it tests using a new(UI)
-func TestNewUI(t *testing.T) {
+// This is the same as TestRun but just assures test coverage
+func TestUI_Run(t *testing.T) {
 	// Set engine
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -66,41 +70,10 @@ func TestNewUI(t *testing.T) {
 	ui.SetPrefix(">")
 	ui.SetIO(in, &out)
 	err := ui.Run(nil, eng)
-	if err != nil && err != io.EOF {
+	var ok bool
+	if err, ok = IsRecoverable(err); !ok {
 		t.Error(err)
 	}
-
-	// Verify the output length
-	// 	- First prefix write
-	//  - Second prefix write
-	//  - EndLine from defer.
-	if out.Len() != 3 {
-		t.Fail()
-	}
-
-	// Verify the output: ">>\n"
-	if out.String() != ">>\n" {
-		t.Fail()
-	}
-}
-
-// This is the same as TestRun but just assures test coverage
-func TestUI_Run(t *testing.T) {
-	// Set engine
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	eng := NewMockEngine(ctrl)
-	eng.EXPECT().Exec(gomock.Any(), gomock.Eq("hello, world!"), gomock.Any()).Return(0).MinTimes(1)
-
-	// Set IO
-	in := bytes.NewReader([]byte("hello, world!"))
-	var out bytes.Buffer
-
-	// Run UI
-	ui := NewUI()
-	ui.SetPrefix(">")
-	ui.SetIO(in, &out)
-	err := ui.Run(nil, eng)
 	if err != nil && err != io.EOF {
 		t.Error(err)
 	}
@@ -132,6 +105,10 @@ func TestRun(t *testing.T) {
 
 	// Run UI
 	err := Run(nil, eng, WithPrefix(">"), WithIO(in, &out))
+	var ok bool
+	if err, ok = IsRecoverable(err); !ok {
+		t.Error(err)
+	}
 	if err != nil && err != io.EOF {
 		t.Error(err)
 	}
@@ -163,8 +140,12 @@ func TestRunWithContext(t *testing.T) {
 	defer ctrl.Finish()
 	eng := NewMockEngine(ctrl)
 	err := Run(ctx, eng, WithIO(pr, ioutil.Discard))
-	if err != context.DeadlineExceeded {
+	var ok bool
+	if err, ok = IsRecoverable(err); !ok {
 		t.Error(err)
+	}
+	if err != context.DeadlineExceeded {
+		t.Errorf("expected context.DeadlineExceeded but instead received: %s", err)
 	}
 
 	pr.Close()
@@ -195,6 +176,10 @@ func TestRunWithLongExec(t *testing.T) {
 
 	eng := testLongEngine{timeout: 1 * time.Minute}
 	err := Run(ctx, eng, WithIO(in, ioutil.Discard))
+	var ok bool
+	if err, ok = IsRecoverable(err); !ok {
+		t.Error(err)
+	}
 	if err != context.DeadlineExceeded {
 		t.Error(err)
 	}
@@ -204,14 +189,61 @@ func TestRunWithLongExec(t *testing.T) {
 }
 
 func TestRunWithNoEngine(t *testing.T) {
-	err := Run(nil, nil)
-	if err != ErrNoEngine {
-		t.Errorf("expected ErrNoEngine but instead received: %s", err)
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			err, ok := r.(error)
+			if !ok {
+				t.Errorf("expected erroNoEngine error from recover but instead received: %v", r)
+			}
+
+			if err != errNoEngine {
+				t.Fail()
+			}
+		}
+	}()
 
 	ui := new(UI)
-	err = ui.Run(nil, nil)
-	if err != ErrNoEngine {
-		t.Errorf("expected ErrNoEngine but instead received: %s", err)
+	ui.Run(nil, nil)
+}
+
+func TestRunWithSignalInterrupt(t *testing.T) {
+	go func() {
+		<-time.After(time.Second) // Give the UI a little time to start up
+		// Send this process a SIGHUP
+		syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	}()
+
+	// Set up UI, IO and Engine
+	ui := new(UI)
+	pr, pw := io.Pipe()
+	eng := testLongEngine{timeout: 1 * time.Minute}
+
+	// Re-route SIGHUP to os.Interrupt so when sending a signal
+	// we don't mess with any other tests
+	opts := []Option{
+		WithIO(pr, pw),
+		WithSignalHandlers(map[os.Signal]SignalHandler{
+			syscall.SIGHUP: func(signal os.Signal) os.Signal {
+				return os.Interrupt
+			},
+		}),
+	}
+
+	// Run UI
+	ctx, cancel := context.WithCancel(context.Background())
+	err := ui.Run(ctx, eng, opts...)
+	cancel()
+
+	// Clean up
+	pr.Close()
+	pw.Close()
+
+	// Check error
+	var ok bool
+	if err, ok = IsRecoverable(err); !ok {
+		t.Error(err)
+	}
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled but instead received: %s", err)
 	}
 }

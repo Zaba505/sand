@@ -171,7 +171,7 @@ func hasWinner(board [][]Player) (player Player, ok bool) {
 }
 
 func main() {
-	ui := sand.NewUI()
+	ui := new(sand.UI)
 
 	ui.SetPrefix(">")
 	ui.SetIO(os.Stdin, os.Stdout)

@@ -10,24 +10,69 @@ package sand
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
+	"github.com/pkg/errors"
 	"io"
+	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 )
 
-// ErrNoEngine represents an interpreter trying to be run without a backing engine.
-var ErrNoEngine = errors.New("sand: interpreter has no associated engine")
+// errNoEngine represents an interpreter trying to be run without a backing engine.
+var errNoEngine = errors.New("sand: engine must be non-null")
+
+// IsRecoverable guesses if the provided error is considered
+// recoverable from. In the sense that the main function can keep
+// running and not log.Fatal or retry or something of that nature.
+// It will default to true for any unknown error, so the caller
+// still needs to do their own error handling of the root error.
+//
+// An example of a recoverable error is an io.EOF if a
+// bytes.Buffer/Reader is used as the input Reader for a UI. This
+// error is obviously recoverable to a human but in this case but
+// a computer has no way of determining that itself.
+//
+// Recoverable Errors:
+//		- context.Cancelled
+// 		- context.DeadlineExceeded
+//		- newLineErr (an internal error, which isn't really important)
+//
+func IsRecoverable(err error) (root error, ok bool) {
+	root = errors.Cause(err)
+
+	// Check Sentinel errors
+	if root == context.DeadlineExceeded || root == context.Canceled {
+		return root, true
+	}
+
+	// Check error types
+errTypes:
+	switch v := root.(type) {
+	case net.Error:
+	case runtime.Error:
+	case newLineErr:
+		root = v.werr
+		goto errTypes
+	default:
+		return root, true
+	}
+
+	return
+}
 
 // SignalHandler is a type that transforms incoming interrupt
 // signals the UI has received.
+//
 type SignalHandler func(os.Signal) os.Signal
 
 // Option represents setting an option for the interpreter UI.
+//
 type Option func(*UI)
 
 // WithPrefix specifies the prefix
+//
 func WithPrefix(prefix string) Option {
 	return func(ui *UI) {
 		ui.prefix = []byte(prefix)
@@ -35,6 +80,7 @@ func WithPrefix(prefix string) Option {
 }
 
 // WithIO specifies the Reader and Writer to use for IO.
+//
 func WithIO(in io.Reader, out io.Writer) Option {
 	return func(ui *UI) {
 		ui.i = in
@@ -43,6 +89,7 @@ func WithIO(in io.Reader, out io.Writer) Option {
 }
 
 // WithSignalHandlers specifies user provided signal handlers to register.
+//
 func WithSignalHandlers(handlers map[os.Signal]SignalHandler) Option {
 	return func(ui *UI) {
 		ui.sigHandlers = handlers
@@ -50,139 +97,127 @@ func WithSignalHandlers(handlers map[os.Signal]SignalHandler) Option {
 }
 
 // UI represents the user interface for the interpreter.
-// UI listens for Interrupt signals and
-// handles them as graceful as possible. If
-// signal handlers are provided then the handling of
-// the Interrupt signal can be overwritten.
+// UI listens for all signals and handles them as graceful
+// as possible. If signal handlers are provided then the
+// handling of the Interrupt and Kill signal can be overwritten.
+// By default, UI will shutdown on Interrupt and Kill signals.
 //
 type UI struct {
-	// Engine shit
-	reqCh chan execReq
-
 	// I/O shit
 	i           io.Reader
 	o           io.Writer
 	prefix      []byte
-	line        []byte
-	sigs        chan os.Signal
 	sigHandlers map[os.Signal]SignalHandler
 
-	// Execution shit
-	ctx context.Context
-}
-
-// NewUI returns a new user interface for an interpreter.
-func NewUI(opts ...Option) *UI {
-	ui := &UI{
-		reqCh: make(chan execReq),
-		sigs:  make(chan os.Signal, 1),
-	}
-
-	for _, opt := range opts {
-		opt(ui)
-	}
-
-	return ui
+	ctx context.Context // This is reset for every Run call
 }
 
 // SetPrefix sets the interpreters line prefix
+//
 func (ui *UI) SetPrefix(prefix string) {
 	ui.prefix = []byte(prefix)
 }
 
 // SetIO sets the interpreters I/O.
+//
 func (ui *UI) SetIO(in io.Reader, out io.Writer) {
 	ui.i = in
 	ui.o = out
 }
 
 // Run creates a UI and associates the provided Engine to it.
-// It then starts the UI. I/O must be provided for this call
-// to not panic.
+// It then starts the UI.
+//
 func Run(ctx context.Context, eng Engine, opts ...Option) error {
-	if eng == nil {
-		return ErrNoEngine
-	}
-
-	ui := NewUI()
+	ui := new(UI)
 	return ui.Run(ctx, eng, opts...)
 }
 
 // minRead
 const minRead = 512
 
+// newLineErr is used for internal use when checking recoverable errors
+type newLineErr struct {
+	werr error
+}
+
+func (e newLineErr) Error() string {
+	return fmt.Sprintf("sand: encountered error when writing newline, %s", e.werr)
+}
+
 // Run starts the user interface with the provided sources
 // for input and output of the interpreter and engine.
 // The prefix will be printed before every line.
+//
 func (ui *UI) Run(ctx context.Context, eng Engine, opts ...Option) (err error) {
 	// Make sure engine is set
 	if eng == nil {
-		return ErrNoEngine
-	}
-	// Check if context is nil
-	if ctx == nil {
-		ctx = context.Background()
+		panic(errNoEngine)
 	}
 
-	// Check signal channel and set up signal notification
-	if ui.sigs == nil {
-		ui.sigs = make(chan os.Signal, 1)
-	}
-	signal.Notify(ui.sigs, os.Interrupt)
+	// Catch any panics
+	defer func() {
+		if r := recover(); r != nil {
+			rerr, ok := r.(error)
+			if !ok {
+				return
+			}
+
+			if err == nil {
+				err = errors.Wrap(rerr, "sand: recovered from panic")
+			}
+		}
+	}()
 
 	// Set options
 	for _, opt := range opts {
 		opt(ui)
 	}
 
-	// Set signal handling
-	var cancel func()
-	ui.ctx, cancel = context.WithCancel(ctx)
+	// Check if context is nil
+	var cancel context.CancelFunc
+	if ctx == nil {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 	defer cancel()
-	defer close(ui.sigs)
-	go func() {
-		for {
-			select {
-			case <-ui.ctx.Done():
-			case sig := <-ui.sigs:
-				handler, exists := ui.sigHandlers[sig]
-				if exists {
-					sig = handler(sig)
-				}
-				if sig == os.Kill || sig == os.Interrupt {
-					cancel()
-				}
-			}
-		}
-	}()
 
-	// Start engine
-	ui.startEngine(ui.ctx, eng)
+	ui.ctx = ctx
+	if cancel == nil {
+		ui.ctx, cancel = context.WithCancel(ctx)
+	}
+
+	// Set up channels
+	reqCh := make(chan execReq)
+	sigs := make(chan os.Signal, 1)
+	defer close(reqCh)
+
+	// Start engine and signal monitoring
+	go ui.monitorSys(ui.ctx, cancel, sigs)
+	ui.startEngine(ctx, eng, reqCh)
 
 	// Now, begin reading lines from input.
 	defer func() {
 		if err == nil || err == io.EOF {
 			_, err = ui.o.Write([]byte("\n"))
+			if err != nil {
+				err = newLineErr{werr: err}
+			}
 			return
 		}
 	}()
-	defer close(ui.reqCh)
 
 	var n int
-
 	for {
 		// Write prefix
 		_, err = ui.Write(nil)
 		if err != nil {
+			err = errors.Wrap(err, "sand: encountered error while writing prefix")
 			return
 		}
 
 		// Read line
 		b := make([]byte, minRead)
 		n, err = ui.Read(b)
-		if err == context.Canceled {
-			return nil
-		}
 		if err != nil && err != io.EOF || n == 0 {
 			return
 		}
@@ -194,7 +229,7 @@ func (ui *UI) Run(ctx context.Context, eng Engine, opts ...Option) (err error) {
 		}
 
 		// Execute line
-		status := ui.exec(ui.ctx, string(b))
+		status := ui.exec(ui.ctx, string(b), reqCh)
 		if status != 0 {
 			return
 		}
@@ -215,11 +250,8 @@ var engines = struct {
 
 // startEngine starts the provided engine and uses it
 // to execute commands.
-func (ui *UI) startEngine(ctx context.Context, eng Engine) {
-	if ui.reqCh == nil {
-		ui.reqCh = make(chan execReq)
-	}
-
+//
+func (ui *UI) startEngine(ctx context.Context, eng Engine, uiReqCh chan execReq) {
 	engines.Lock()
 	reqCh, exists := engines.engs[eng]
 	if !exists {
@@ -229,7 +261,29 @@ func (ui *UI) startEngine(ctx context.Context, eng Engine) {
 	}
 	engines.Unlock()
 
-	reqCh <- ui.reqCh
+	reqCh <- uiReqCh
+}
+
+// monitorSys monitors syscalls from the OS
+//
+func (ui *UI) monitorSys(ctx context.Context, cancel context.CancelFunc, sigCh chan os.Signal) {
+	signal.Notify(sigCh)
+	defer close(sigCh)
+	defer signal.Stop(sigCh)
+
+	for {
+		select {
+		case <-ctx.Done():
+		case sig := <-sigCh:
+			handler, exists := ui.sigHandlers[sig]
+			if exists {
+				sig = handler(sig)
+			}
+			if sig == os.Kill || sig == os.Interrupt {
+				cancel()
+			}
+		}
+	}
 }
 
 // ioResp represents the response parameters from either a Read or Write call.
@@ -239,6 +293,7 @@ type ioResp struct {
 }
 
 // readAsync wraps a Read call and sends the result to the given channel
+//
 func (ui *UI) readAsync(b []byte, readCh chan ioResp) {
 	var resp ioResp
 	resp.n, resp.err = ui.i.Read(b)
@@ -254,6 +309,7 @@ func (ui *UI) readAsync(b []byte, readCh chan ioResp) {
 // the current context. Thus, callers should handle
 // context errors appropriately. See examples for
 // such handling.
+//
 func (ui *UI) Read(b []byte) (n int, err error) {
 	readCh := make(chan ioResp, 1)
 
@@ -271,6 +327,7 @@ func (ui *UI) Read(b []byte) (n int, err error) {
 }
 
 // writeAsync wraps a Write call and send the result to the given channel
+//
 func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
 	prefix := ui.prefix
 
@@ -285,8 +342,8 @@ func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
 
 // Write writes the provided bytes to the UIs underlying
 // output along with the prefix characters.
+//
 func (ui *UI) Write(b []byte) (n int, err error) {
-	// TODO(Zaba505): Should writes be buffered as to allow for limiting i.e. limit network calls if ui.o == net.Conn
 	writeCh := make(chan ioResp, 1)
 
 	go ui.writeAsync(b, writeCh)

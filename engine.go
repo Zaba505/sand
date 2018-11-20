@@ -25,7 +25,7 @@ type execReq struct {
 
 // exec sends the given line to the backing engine and awaits the results.
 // this is a blocking call.
-func (ui *UI) exec(ctx context.Context, line string) int {
+func (ui *UI) exec(ctx context.Context, line string, reqCh chan execReq) int {
 	req := execReq{
 		ctx:    ctx,
 		line:   line,
@@ -35,14 +35,19 @@ func (ui *UI) exec(ctx context.Context, line string) int {
 	select {
 	case <-ctx.Done():
 		return 0
-	case ui.reqCh <- req:
+	case reqCh <- req:
 	}
 	return <-req.respCh
 }
 
 // runEngine provides a container for an engine to run inside.
 func runEngine(ctx context.Context, eng Engine, reqChs chan chan execReq) {
-	defer close(reqChs)
+	defer func() {
+		close(reqChs)
+		engines.Lock()
+		delete(engines.engs, eng)
+		engines.Unlock()
+	}()
 
 	for {
 		select {
