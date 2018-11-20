@@ -8,6 +8,7 @@
 package sand
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -17,7 +18,7 @@ import (
 )
 
 // ErrNoEngine represents an interpreter trying to be run without a backing engine.
-var ErrNoEngine = errors.New("intrptr: interpreter has no associated engine")
+var ErrNoEngine = errors.New("sand: interpreter has no associated engine")
 
 // SignalHandler is a type that transforms incoming interrupt
 // signals the UI has received.
@@ -158,14 +159,15 @@ func (ui *UI) Run(ctx context.Context, opts ...Option) (err error) {
 
 	// Now, begin reading lines from input.
 	defer func() {
-		oldPre := ui.prefix
-		ui.SetPrefix("\n")
-		ui.Write(nil)
-		ui.prefix = oldPre
+		if err == nil || err == io.EOF {
+			_, err = ui.o.Write([]byte("\n"))
+			return
+		}
 	}()
 	defer close(ui.reqCh)
 
 	var n int
+
 	for {
 		// Write prefix
 		_, err = ui.Write(nil)
@@ -181,6 +183,12 @@ func (ui *UI) Run(ctx context.Context, opts ...Option) (err error) {
 		}
 		if err != nil && err != io.EOF || n == 0 {
 			return
+		}
+
+		// Truncate nil bytes
+		idx := bytes.IndexByte(b, 0)
+		if idx != -1 {
+			b = b[:idx]
 		}
 
 		// Execute line
@@ -262,8 +270,10 @@ func (ui *UI) Read(b []byte) (n int, err error) {
 
 // writeAsync wraps a Write call and send the result to the given channel
 func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
+	prefix := ui.prefix
+
 	var resp ioResp
-	resp.n, resp.err = ui.o.Write(append(ui.prefix, b...))
+	resp.n, resp.err = ui.o.Write(append(prefix, b...))
 	select {
 	case <-ui.ctx.Done():
 	case writeCh <- resp:

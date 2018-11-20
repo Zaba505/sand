@@ -32,7 +32,7 @@ func echoHandler(t *testing.T) func(context.Context, string, io.ReadWriter) int 
 
 		err := rootCmd.Execute()
 		if err != nil {
-			t.Error(err)
+			t.Errorf("cobra command encountered an error: %s", err)
 			return 1
 		}
 
@@ -78,20 +78,20 @@ func TestRootCmd(t *testing.T) {
 
 			_, err := in.Write([]byte(inData))
 			if err != nil {
-				subT.Error(err)
+				subT.Errorf("failed writing to input buffer: %s", err)
 			}
 
-			if err = ui.Run(nil); err != io.EOF {
-				subT.Error(err)
+			if err = ui.Run(nil); err != io.EOF && err != nil {
+				subT.Errorf("unexpected error encountered during UI.Run(): %s", err)
 			}
 
 			b, err := ioutil.ReadAll(&out)
 			if err != nil {
-				subT.Error(err)
+				subT.Errorf("failed reading everything from output buffer: %s", err)
 			}
 
-			b = bytes.Trim(b, ">")
-			if string(append(b[:len(outData)-1], "]"...)) != outData {
+			b = bytes.Trim(b, "\n>")
+			if string(b) != outData {
 				subT.Fail()
 			}
 		})
