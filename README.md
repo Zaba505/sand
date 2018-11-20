@@ -14,9 +14,9 @@ the User Interface, `sand.UI`, and the Command Processor,`sand.Engine`. The foll
 diagram shows how under the hood `sand` operates. Every square is a goroutine.
 
 ```text
-+--------+                                +-------------------------+
-|        |              +----------------->     Engines Manager     +-----------+
-|  Read  <----------+   |                 +-------------------------+           |
++--------+                            +--------------------------+
+|        |              +------------->     Engines Manager      +--------------+
+|  Read  <----------+   |             +--------------------------+              |
 |        |          |   |                                                       |
 +----+---+          |   |                                                       |
      |            +-+---+------+                                        +-------v------+
@@ -24,13 +24,14 @@ diagram shows how under the hood `sand` operates. Every square is a goroutine.
      +------------>     UI     |                                        |    Engine    |     |  Engine  |
                   |  (usually  +---------------------------------------->    Runner    +---->+   Exec   |
      +------------>    main)   |                                        |              |     |          |
-     |            |            |     XXXXXXXXXXXXXXXXXXXXXXXXXXXX       |              |     +----------+
-     |            +-+----------+     X    Manager connects UI   X       +--------------+
-+----+---+          |                X    to Engine Runner      X
-|        |          |                XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+     |            |            |      XXXXXXXXXXXXXXXXXXXXXXXXXXXX      |              |     +----------+
+     |            +-+----------+      X   Manager connects UI    X      +--------------+
++----+---+          |                 X   to Engine Runner       X
+|        |          |                 XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 | Write  <----------+
 |        |
 +--------+
+
 ```
 
 `sand.UI` is a `struct` that is provided for you and is implemented as broad as possible;
