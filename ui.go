@@ -35,11 +35,16 @@ var errNoEngine = errors.New("sand: engine must be non-null")
 // a computer has no way of determining that itself.
 //
 // Recoverable Errors:
+//		- err == nil
 //		- context.Cancelled
 // 		- context.DeadlineExceeded
 //		- newLineErr (an internal error, which isn't really important)
 //
 func IsRecoverable(err error) (root error, ok bool) {
+	if err == nil {
+		return nil, true
+	}
+
 	root = errors.Cause(err)
 
 	// Check Sentinel errors
@@ -163,9 +168,7 @@ func (ui *UI) Run(ctx context.Context, eng Engine, opts ...Option) (err error) {
 				return
 			}
 
-			if err == nil {
-				err = errors.Wrap(rerr, "sand: recovered from panic")
-			}
+			err = errors.Wrap(rerr, "sand: recovered from panic")
 		}
 	}()
 
@@ -179,12 +182,12 @@ func (ui *UI) Run(ctx context.Context, eng Engine, opts ...Option) (err error) {
 	if ctx == nil {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
-	defer cancel()
 
 	ui.ctx = ctx
 	if cancel == nil {
 		ui.ctx, cancel = context.WithCancel(ctx)
 	}
+	defer cancel()
 
 	// Set up channels
 	reqCh := make(chan execReq)
@@ -329,10 +332,8 @@ func (ui *UI) Read(b []byte) (n int, err error) {
 // writeAsync wraps a Write call and send the result to the given channel
 //
 func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
-	prefix := ui.prefix
-
 	var resp ioResp
-	resp.n, resp.err = ui.o.Write(append(prefix, b...))
+	resp.n, resp.err = ui.o.Write(b)
 	select {
 	case <-ui.ctx.Done():
 	case writeCh <- resp:
@@ -343,10 +344,20 @@ func (ui *UI) writeAsync(b []byte, writeCh chan ioResp) {
 // Write writes the provided bytes to the UIs underlying
 // output along with the prefix characters.
 //
+// In order to avoid data races due to the UI prefix, any
+// changes to the prefix must be done in a serial pair of
+// SetPrefix and Write calls. This means multiple goroutines
+// cannot call SetPrefix + Write, simultaneously. See example
+// "tictactoe" for a demonstration of changing the prefix.
+//
 func (ui *UI) Write(b []byte) (n int, err error) {
-	writeCh := make(chan ioResp, 1)
+	prefix := ui.prefix
+	if prefix == nil && b == nil { // skips writing empty prefix call in Run call
+		return
+	}
 
-	go ui.writeAsync(b, writeCh)
+	writeCh := make(chan ioResp, 1)
+	go ui.writeAsync(append(prefix, b...), writeCh)
 
 	select {
 	case <-ui.ctx.Done():

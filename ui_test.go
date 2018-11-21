@@ -139,6 +139,7 @@ func TestRunWithContext(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	eng := NewMockEngine(ctrl)
+
 	err := Run(ctx, eng, WithIO(pr, ioutil.Discard))
 	var ok bool
 	if err, ok = IsRecoverable(err); !ok {
